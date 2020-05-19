@@ -1,0 +1,109 @@
+package reactivexteste
+
+import rx.lang.scala._
+
+package reactivexteste
+
+import rx.lang.scala.{Observable, Subscriber, Subscription}
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+
+trait CalcNoDep {
+  def myFunc(observer: Subscriber[Boolean]): Boolean
+  def that = Observable[Boolean] { observer =>
+    Future {
+      val ret = myFunc(observer)
+      observer.onNext(ret)
+    }
+    Subscription()
+  }
+}
+
+
+trait NodeWithDepNotFinal {
+  def deps: List[Observable[Boolean]]
+  def myFunc(observer: Subscriber[Boolean], array: Seq[Boolean]): Boolean
+  def that: Observable[Boolean] = Observable[Boolean] { observer =>
+    val allObs = Observable.from(deps)
+    val zipObs = Observable.zip(allObs)
+    zipObs.subscribe(array => {
+      Future {
+        observer.onNext(myFunc(observer, array))
+      }
+      Subscription()
+    })
+  }
+}
+
+
+
+trait FinalNode {
+  def deps: List[Observable[Boolean]]
+  def myFunc(cur: Long, a: Seq[Boolean]): Unit
+  def that: Subscription =  {
+    val cur = System.currentTimeMillis()
+    val allObs = Observable.from(deps)
+    val zipObs = Observable.zip(allObs)
+    zipObs.subscribe(a => {
+      myFunc(cur, a)
+    })
+  }
+}
+
+object RXFirstTeste extends App{
+    object Calc1 extends CalcNoDep{
+    def myFunc(observer: Subscriber[Boolean]): Boolean = {
+      Thread.sleep(4000)
+      val newsFeed = "teste 1"
+      true
+    }
+  }
+
+  object Calc2 extends NodeWithDepNotFinal{
+    def deps = List(Calc1.that)
+    def myFunc(observer: Subscriber[Boolean], array: Seq[Boolean]) = {
+      Thread.sleep(3000)
+      val newsFeed = "teste 3"
+      array.forall(_ == true)
+    }
+  }
+
+  object Calc3 extends NodeWithDepNotFinal{
+    def deps = List(Calc2.that, Calc1.that)
+    def myFunc(observer: Subscriber[Boolean], array: Seq[Boolean]) = {
+      Thread.sleep(10000)
+      val newsFeed = "teste 3"
+      array.forall(_ == true)
+    }
+  }
+
+  object Calc4 extends FinalNode{
+    def deps = List(Calc3.that, Calc2.that)
+    def myFunc(cur: Long, a: Seq[Boolean]) = {
+      val time = (System.currentTimeMillis() / 1000) - (cur / 1000)
+      println(s"4 -> ${a.forall(_ == true)} in $time")
+    }
+  }
+
+  object Calc5 extends FinalNode{
+    def deps = List(Calc2.that)
+    def myFunc(cur: Long, a: Seq[Boolean]) = {
+      val time = (System.currentTimeMillis() / 1000) - (cur / 1000)
+      println(s"5 -> ${a.forall(_ == true)} in $time")
+    }
+  }
+  object Calc6 extends FinalNode{
+    def deps = List(Calc1.that)
+    def myFunc(cur: Long, a: Seq[Boolean]) = {
+      val time = (System.currentTimeMillis() / 1000) - (cur / 1000)
+      println(s"6 -> ${a.forall(_ == true)} in $time")
+    }
+  }
+
+  Calc4.that
+  Calc5.that
+  Calc6.that
+
+  Thread.sleep(60000)
+  println("End")
+}
